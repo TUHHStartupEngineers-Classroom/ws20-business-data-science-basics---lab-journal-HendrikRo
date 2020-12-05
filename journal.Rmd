@@ -491,3 +491,157 @@ combined_data_3_ten_count %>% slice(1:5)
 
 ```
 
+
+# Challenge Four
+
+## Part One
+
+``` {r}
+library(tidyverse)
+library(lubridate)
+library(glue)
+
+covid_data_tbl <- read_csv("https://opendata.ecdc.europa.eu/covid19/casedistribution/csv") 
+
+# covid_data_tbl %>% glimpse()
+
+# Data Manipulation ----
+
+covid_cases_com_tbl <- covid_data_tbl %>%
+  
+  select(cases, countriesAndTerritories, dateRep) %>%
+  filter(countriesAndTerritories %in% c("Germany",
+                                        "France",
+                                        "Spain",
+                                        "United_Kingdom",
+                                        "United_States_of_America")) %>%
+  
+  
+  
+  mutate(date       = lubridate::dmy(dateRep)) %>% 
+  
+  group_by(countriesAndTerritories, date) %>%
+  summarize(total_cases = sum(cases)) %>% 
+  mutate(total_cases = cumsum(total_cases)) %>%
+  ungroup()
+  
+
+
+# Data Visualization ----
+  
+covid_cases_com_tbl %>% 
+  
+  ggplot(aes(date, total_cases, color = countriesAndTerritories)) +
+  
+  geom_label(aes(label = str_glue("{max(total_cases)}")) ,
+             data = filter(covid_cases_com_tbl, countriesAndTerritories == last(countriesAndTerritories) &
+                             date == last(date) ),
+             show.legend = FALSE,
+             hjust = 1.1, 
+             size  = 5,
+             fill  = "yellow",
+             color = "black",
+             fontface = "italic") +
+  
+  geom_line(size = 1, linetype = 1) +
+  
+
+  
+  scale_color_viridis_d(option = "C") +
+  theme_minimal() +
+  
+  scale_x_date(date_breaks = "1 month", date_labels = "%B" ) +
+  
+  scale_y_continuous(breaks = seq(0, 20e6, by = 5e6),
+                     labels = scales::label_number(scale = 1e-6,
+                                                   prefix = "",
+                                                   suffix = " M")) +
+  
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  
+  theme(legend.position = "bottom") +
+
+  labs(
+    title = "COVID-19 confirmed cases",
+    subtitle = "Selected countries",
+    x = "Year 2020",
+    y = "Total Cases",
+    color = "Country"
+  ) 
+
+
+```
+
+## Part TWO
+
+```{r}
+
+library(tidyverse)
+library(lubridate)
+library(maps)
+
+covid_data_2_tbl <- read_csv("https://opendata.ecdc.europa.eu/covid19/casedistribution/csv") %>% 
+  
+  mutate(across(countriesAndTerritories, str_replace_all, "_", " ")) %>%
+  mutate(countriesAndTerritories = case_when(
+    
+    countriesAndTerritories == "United Kingdom" ~ "UK",
+    countriesAndTerritories == "United States of America" ~ "USA",
+    countriesAndTerritories == "Czechia" ~ "Czech Republic",
+    TRUE ~ countriesAndTerritories
+    
+  )) 
+
+
+
+world <- map_data("world")
+
+# covid_data_2_tbl %>% glimpse()
+
+# Data Manipulation ----
+
+covid_deaths_tbl <- covid_data_2_tbl %>%
+  
+  select(countriesAndTerritories, deaths, popData2019) %>%
+  
+  group_by(countriesAndTerritories, popData2019) %>%
+  summarize(total_deaths = sum(deaths)) %>% 
+  ungroup() %>%
+  
+  transmute(countriesAndTerritories ,mortality = total_deaths/popData2019)
+
+
+world_deaths <- left_join(x = world, y = covid_deaths_tbl, by = c("region" = "countriesAndTerritories"))
+
+
+# Data Visualization ----
+
+world_deaths %>%
+  
+  ggplot() +
+  
+  geom_map(aes(x = long, y = lat, map_id = region, fill = mortality), map = world) +
+  
+  scale_fill_gradient(low = "red", high = "black",
+                      breaks = seq(0, 0.0013, by = 0.0003) ,
+                      labels = scales::label_number(scale = 1,
+                                                    prefix = "",
+                                                    suffix = " %")) +
+  
+  theme_minimal() +
+  
+  scale_x_continuous(labels = NULL) +
+  scale_y_continuous(labels = NULL) +
+  
+  
+  labs(
+    title = "Confirmed COVID-19 deaths relative to the population size",
+    subtitle = " ",
+    x = " ",
+    y = " ",
+    fill = "Mortality Rate"
+   ) 
+
+
+
+```
