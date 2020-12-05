@@ -49,7 +49,7 @@ world_deaths %>%
   
   scale_fill_gradient(low = "red", high = "black",
                       breaks = seq(0, 0.0013, by = 0.0003) ,
-                      labels = scales::label_number(scale = 1,
+                      labels = scales::label_number(scale = 100,
                                                     prefix = "",
                                                     suffix = " %")) +
   
