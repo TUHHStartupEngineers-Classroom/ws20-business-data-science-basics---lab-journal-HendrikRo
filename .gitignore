@@ -36,3 +36,9 @@ vignettes/*.pdf
 *.knit.md
 
 # R Environment Variables
+.Renviron
+*.zip
+*.txt
+*.tsv
+*.xlsx
+.RDataTmp

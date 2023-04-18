@@ -1,6 +1,6 @@
 ---
 title: "Journal (reproducible report)"
-author: "Joschka Schwarz"
+author: "Hendrik Rogoll"
 date: "2020-11-05"
 output:
   html_document:
@@ -52,3 +52,617 @@ hist(samples)
 ```
 
 When you knit this R Markdown document, you will see that the histogram is printed to the page, along with the R code. This document can be set up to hide the R code in the webpage, just delete the comment (hashtag) from the cold folding option in the yaml header up top. For purposes of letting yourself see the code, and me see the code, best to keep it the way that it is. You'll learn that all of these things and more can be customized in each R code block.
+
+# Challenge One
+
+```{r plot, fig.width=10, fig.height=7}
+
+# Introduction of challenge one ----
+
+library(tidyverse)
+library(readxl)
+library(lubridate)
+
+bike_orderlines_wrangled_tbl <- read_excel("DS_101/00_data/01_bike_sales/02_wrangled_data/bike_orderlines.xlsx")
+
+# bike_orderlines_wrangled_tbl
+# glimpse(bike_orderlines_wrangled_tbl)
+
+location_bike_orderlines_wrangled_tbl <- bike_orderlines_wrangled_tbl %>%
+  separate(col = location,
+           into = c("city", "state"),
+           sep = ", ") 
+
+# glimpse(location_bike_orderlines_wrangled_tbl)
+
+# 1. Part of challenge one ----
+
+sales_by_state_tbl <- location_bike_orderlines_wrangled_tbl %>%
+  select(state, total_price) %>%
+  group_by(state) %>%
+  summarise(revenue = sum(total_price)) %>%
+  mutate(revenue_text = scales::dollar(revenue, big.mark = ".", 
+                                       decimal.mark = ",", 
+                                       prefix = "", 
+                                       suffix = " €"))
+# sales_by_state_tbl
+
+sales_by_state_tbl %>%
+  ggplot(aes(x = state, y = revenue)) +
+  geom_col(fill = "#2DC6D6") +
+  geom_label(aes(label = revenue_text)) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  scale_y_continuous(labels = scales::dollar_format(big.mark = ".", 
+                                                    decimal.mark = ",", 
+                                                    prefix = "", 
+                                                    suffix = " €")) +
+  labs(
+    title    = "Revenue by state",
+    subtitle = " ",
+    x = "",
+    y = "Revenue"
+  )
+
+# 2. Part of challenge one ----
+
+sales_by_state_year_tbl <- location_bike_orderlines_wrangled_tbl %>%
+  select(state, total_price, order_date) %>%
+  mutate(year = year(order_date)) %>%
+  group_by(state, year) %>%
+  summarise(revenue = sum(total_price)) %>%
+  ungroup() %>%
+  mutate(revenue_text = scales::dollar(revenue, big.mark = ".", 
+                                       decimal.mark = ",", 
+                                       prefix = "", 
+                                       suffix = " €"))
+# sales_by_state_year_tbl
+
+sales_by_state_year_tbl %>%
+  ggplot(aes(x = year, y = revenue, fill = state)) +
+  geom_col() +
+  geom_smooth(method = "lm", se = FALSE) +
+  facet_wrap(~ state) +
+  scale_y_continuous(labels = scales::dollar_format(big.mark = ".", 
+                                                    decimal.mark = ",", 
+                                                    prefix = "", 
+                                                    suffix = " €")) +
+  labs(
+    title = "Revenue by year and main category",
+    subtitle = " ",
+    fill = "State"
+  )
+
+```
+
+# Challenge Two
+
+## Part One
+
+``` {r}
+
+library(tidyverse)
+library(httr)
+library(glue)
+library(jsonlite)
+
+# All NBA Teams
+
+# resp <- GET("https://www.balldontlie.io/api/v1/players/<ID>")
+
+nba_api <- function(path) {
+  url <- modify_url(url = "https://www.balldontlie.io", path = glue("/api/v1{path}"))
+  resp <- GET(url)
+  stop_for_status(resp) # automatically throws an error if a request did not succeed
+}
+
+resp <- nba_api("/players/1")
+resp
+
+teams <- resp %>% 
+  .$content %>% 
+  rawToChar() %>% 
+  fromJSON()
+
+teams
+
+```
+
+## Part Two
+
+For this challenge the website from rosebikes was scraped. As a result all bikes for all categories are shown, which are available with the same code, thus a few categories were ignored. Additionally, all bikes are summed up in one tibble.
+
+``` {r}
+# Libraries ----
+
+library(tidyverse) # Main Package - Loads dplyr, purrr, etc.
+library(rvest)     # HTML Hacking & Web Scraping
+library(xopen)     # Quickly opening URLs
+library(jsonlite)  # converts JSON files to R objects
+library(glue)      # concatenate strings
+library(stringi)   # character string/text processing
+
+# Bike-Category Links ----
+
+url_home <- "https://www.rosebikes.de/fahrr%C3%A4der"
+html_home <- read_html(url_home)
+
+bike_category_url_tbl <- html_home %>%
+  
+  html_nodes(css = ".catalog-navigation__link") %>%
+  html_attr('href') %>%
+  
+  
+  # Categories Sale, Kinder, E-Bike and Bike-Finder ignored
+  discard(.p = ~stringr::str_detect(.x,"sale|zoovu|kinder|e-bike")) %>%
+  
+  enframe(name = "position", value = "subdirectory") %>%
+  
+  mutate(
+    url = glue("https://www.rosebikes.de{subdirectory}")
+  ) %>%
+  
+  distinct(url)
+
+# bike_category_url_tbl
+
+bike_category_char_tbl <- html_home %>%
+  html_nodes(css = ".catalog-categories-item__title") %>%
+  html_text() %>%
+  discard(.p = ~stringr::str_detect(.x,"Sale|Bike-Finder|Kinder|E-Bike")) %>%
+  enframe(name = "position", value = "category")
+# bike_category_char_tbl
+
+
+
+# Load Bikes ----
+
+l1 = 1
+l2 = nrow(bike_category_char_tbl)
+all_bikes <- tibble(position = 1, category = "-" , title = "-" , price = "-" )
+
+for (i in seq(l1, l2)) {
+
+bike_category_url <- bike_category_url_tbl$url[i]
+# bike_category_url 
+bike_category_char <- bike_category_char_tbl$category[i]
+# bike_category_char
+
+# xopen(bike_category_url)
+
+
+bike_models_title <- read_html(bike_category_url) %>%
+  
+  html_nodes(css = ".catalog-category-bikes__title-text") %>%
+  html_text(trim = TRUE) %>%
+  
+  enframe(name = "position", value = "title")
+
+# bike_models_title
+
+
+bike_models_price <- read_html(bike_category_url) %>%
+  
+  html_nodes(css = ".catalog-category-bikes__price-title") %>%
+  html_text(trim = TRUE) %>%
+  
+  enframe(name = "position", value = "price")
+
+# bike_models_price
+
+L = nrow(bike_models_price)
+
+bike_category <- tibble(position = 1:L, category = c(bike_category_char))
+# bike_category
+
+bike_models <- left_join(bike_category, bike_models_title, by = "position") %>%
+  left_join(., bike_models_price, by = "position")
+
+
+print(bike_models)
+
+all_bikes <- all_bikes %>% add_row(bike_models) 
+
+Sys.sleep(10)
+
+}
+
+
+all_bikes_final <- all_bikes[-c(1), ]
+all_bikes_final %>% head(10)
+
+
+```
+
+# Challenge Three
+
+Since I was not able to calculate this Challenge while building the website, the results are presented separately.
+
+``` {r, eval=F}
+# Import Libraries ----
+
+library(tidyverse)
+library(vroom)
+library(data.table)
+library(tictoc)
+
+# 1 Import Data ----
+
+# assignee ----
+
+col_types_a <- list(
+  id = col_character(),
+  type = col_character(),
+  name_first = col_skip(),
+  name_last = col_skip(),
+  organization = col_character()
+)
+
+assignee_tbl <- vroom(
+  file       = "DS_101/02_data_wrangling/assignee.tsv/assignee.tsv", 
+  delim      = "\t", 
+  col_types  = col_types_a,
+  na         = c("", "NA", "NULL")
+)
+
+# assignee_tbl %>% glimpse()
+
+# patent_assignee ----
+
+col_types_pa <- list(
+  patent_id = col_character(),
+  assignee_id = col_character(),
+  location_id = col_skip()
+)
+
+patent_assignee_tbl <- vroom(
+  file       = "DS_101/02_data_wrangling/patent_assignee.tsv/patent_assignee.tsv", 
+  delim      = "\t", 
+  col_types  = col_types_pa,
+  na         = c("", "NA", "NULL")
+)
+
+# patent_assignee_tbl %>% glimpse()
+
+# patent ----
+
+col_types_p <- list(
+  id = col_character(),
+  type = col_skip(),
+  number = col_skip(),
+  country = col_skip(),
+  date = col_date("%Y-%m-%d"),
+  abstract = col_skip(),
+  title = col_skip(),
+  kind = col_skip(),
+  num_claims = col_skip(),
+  filename = col_skip(),
+  withdrawn = col_skip()
+)
+
+patent_tbl <- vroom(
+  file       = "DS_101/02_data_wrangling/patent.tsv/patent.tsv", 
+  delim      = "\t", 
+  col_types  = col_types_p,
+  na         = c("", "NA", "NULL")
+)
+
+# patent_tbl %>% glimpse()
+
+# uspc ----
+
+col_types_u <- list(
+  uuid = col_skip(),
+  patent_id = col_character(),
+  mainclass_id = col_character(),
+  subclass_id = col_skip(),
+  sequence = col_skip()
+)
+
+uspc_tbl <- vroom(
+  file       = "DS_101/02_data_wrangling/uspc.tsv/uspc.tsv", 
+  delim      = "\t", 
+  col_types  = col_types_u,
+  na         = c("", "NA", "NULL")
+)
+
+# uspc_tbl %>% glimpse()
+
+# 2 Convert ----
+
+# class(assignee_tbl)
+# class(patent_assignee_tbl)
+# class(patent_tbl)
+# class(uspc_tbl)
+
+# tic()
+setDT(assignee_tbl)
+setDT(patent_assignee_tbl)
+setDT(patent_tbl)
+setDT(uspc_tbl)
+# toc()
+ 
+# class(assignee_tbl)
+# class(patent_assignee_tbl)
+# class(patent_tbl)
+# class(uspc_tbl)
+
+# assignee_tbl %>% glimpse()
+# patent_assignee_tbl %>% glimpse()
+# patent_tbl %>% glimpse()
+# uspc_tbl %>% glimpse()
+
+# Challenge Part One ----
+
+# 3 Wrangling ----
+
+assignee_tbl <- assignee_tbl %>% rename(assignee_id = id)
+# assignee_tbl
+
+
+combined_data <- merge(x = assignee_tbl, y = patent_assignee_tbl, 
+                       by    = "assignee_id", 
+                       all.x = TRUE, 
+                       all.y = TRUE)
+
+
+# combined_data %>% glimpse()
+
+setkey(combined_data, "assignee_id")
+# key(combined_data)
+
+setorderv(combined_data, c("assignee_id", "patent_id"))
+
+# combined_data %>% glimpse()
+combined_data_1 <- combined_data %>% filter(type == 2)
+
+combined_data_count <- combined_data_1[!is.na(organization), .N, by = organization]
+   
+
+combined_data_count <- combined_data_count %>% arrange(desc(N))
+               
+combined_data_count %>% slice(1:10)
+
+ # write_rds(combined_data_count %>% slice(1:10), file = "Challenge_3_results/results_1.rds")
+
+# Challenge Part 2 ----
+
+# 3 Wrangling ----
+
+patent_tbl <- patent_tbl %>% rename(patent_id = id)
+# patent_tbl
+
+
+combined_data_2 <- merge(x = combined_data, y = patent_tbl, 
+                       by    = "patent_id", 
+                       all.x = TRUE, 
+                       all.y = TRUE)
+
+
+# combined_data_2
+
+setkey(combined_data_2, "patent_id")
+# key(combined_data_2)
+
+keep_cols <- c("organization", "date", "type")
+
+combined_data_2 <- combined_data_2[, ..keep_cols]
+
+combined_data_2 <- combined_data_2 %>% mutate(date = year(date)) %>% filter(date == 2019, type == 2)
+
+# combined_data_2 
+
+
+combined_data_2_count <- combined_data_2[!is.na(organization), .N, by = organization]
+ 
+
+combined_data_2_count <- combined_data_2_count %>% arrange(desc(N))
+
+combined_data_2_count %>% slice(1:10)
+
+ # write_rds(combined_data_2_count %>% slice(1:10), file = "Challenge_3_results/results_2.rds")
+
+# Challenge Part Three ----
+
+# 3 Wrangling ----
+
+
+combined_data_3 <- merge(x = combined_data, y = uspc_tbl, 
+                         by    = "patent_id", 
+                         all.x = TRUE, 
+                         all.y = TRUE)
+
+
+# combined_data_3 %>% glimpse()
+
+setkey(combined_data_3, "mainclass_id")
+# key(combined_data_3)
+
+keep_cols <- c("organization", "mainclass_id")
+
+combined_data_3 <- combined_data_3[, ..keep_cols]
+
+top_all <- combined_data[!is.na(organization), .N, by = organization] %>% arrange(desc(N))
+top_ten <- top_all %>% slice(1:10) %>% pull(organization)
+# top_ten
+
+combined_data_3_ten <- combined_data_3 %>% filter(organization == top_ten)
+
+
+combined_data_3_ten_count <- combined_data_3_ten[!is.na(mainclass_id), .N, by = mainclass_id]
+
+
+combined_data_3_ten_count <- combined_data_3_ten_count %>% arrange(desc(N))
+combined_data_3_ten_count %>% slice(1:5)
+
+ # write_rds(combined_data_3_ten_count %>% slice(1:5), file = "Challenge_3_results/results_3.rds")
+
+```
+
+The first table shows the 10 US companies with the most patents, the second one shows the 10 US companies that had the most new patents in 2019, and the third table shows the top 5 main classes of the top 10 worldwide companies.
+
+``` {r}
+
+results_1 <- read_rds("Challenge_3_results/results_1.rds")
+results_2 <- read_rds("Challenge_3_results/results_2.rds")
+results_3 <- read_rds("Challenge_3_results/results_3.rds")
+
+results_1
+results_2
+results_3
+
+
+```
+
+# Challenge Four
+
+## Part One
+
+``` {r}
+library(tidyverse)
+library(lubridate)
+library(glue)
+
+covid_data_tbl <- read_csv("https://opendata.ecdc.europa.eu/covid19/casedistribution/csv") 
+
+# covid_data_tbl %>% glimpse()
+
+# Data Manipulation ----
+
+covid_cases_com_tbl <- covid_data_tbl %>%
+  
+  select(cases, countriesAndTerritories, dateRep) %>%
+  filter(countriesAndTerritories %in% c("Germany",
+                                        "France",
+                                        "Spain",
+                                        "United_Kingdom",
+                                        "United_States_of_America")) %>%
+  
+  
+  
+  mutate(date       = lubridate::dmy(dateRep)) %>% 
+  
+  group_by(countriesAndTerritories, date) %>%
+  summarize(total_cases = sum(cases)) %>% 
+  mutate(total_cases = cumsum(total_cases)) %>%
+  ungroup()
+  
+
+
+# Data Visualization ----
+  
+covid_cases_com_tbl %>% 
+  
+  ggplot(aes(date, total_cases, color = countriesAndTerritories)) +
+  
+  geom_label(aes(label = str_glue("{max(total_cases)}")) ,
+             data = filter(covid_cases_com_tbl, countriesAndTerritories == last(countriesAndTerritories) &
+                             date == last(date) ),
+             show.legend = FALSE,
+             hjust = 1.1, 
+             size  = 5,
+             fill  = "yellow",
+             color = "black",
+             fontface = "italic") +
+  
+  geom_line(size = 1, linetype = 1) +
+  
+
+  
+  scale_color_viridis_d(option = "C") +
+  theme_minimal() +
+  
+  scale_x_date(date_breaks = "1 month", date_labels = "%B" ) +
+  
+  scale_y_continuous(breaks = seq(0, 20e6, by = 5e6),
+                     labels = scales::label_number(scale = 1e-6,
+                                                   prefix = "",
+                                                   suffix = " M")) +
+  
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  
+  theme(legend.position = "bottom") +
+
+  labs(
+    title = "COVID-19 confirmed cases",
+    subtitle = "Selected countries",
+    x = "Year 2020",
+    y = "Total Cases",
+    color = "Country"
+  ) 
+
+
+```
+
+## Part TWO
+
+```{r}
+
+library(tidyverse)
+library(lubridate)
+library(maps)
+
+covid_data_2_tbl <- read_csv("https://opendata.ecdc.europa.eu/covid19/casedistribution/csv") %>% 
+  
+  mutate(across(countriesAndTerritories, str_replace_all, "_", " ")) %>%
+  mutate(countriesAndTerritories = case_when(
+    
+    countriesAndTerritories == "United Kingdom" ~ "UK",
+    countriesAndTerritories == "United States of America" ~ "USA",
+    countriesAndTerritories == "Czechia" ~ "Czech Republic",
+    TRUE ~ countriesAndTerritories
+    
+  )) 
+
+
+
+world <- map_data("world")
+
+# covid_data_2_tbl %>% glimpse()
+
+# Data Manipulation ----
+
+covid_deaths_tbl <- covid_data_2_tbl %>%
+  
+  select(countriesAndTerritories, deaths, popData2019) %>%
+  
+  group_by(countriesAndTerritories, popData2019) %>%
+  summarize(total_deaths = sum(deaths)) %>% 
+  ungroup() %>%
+  
+  transmute(countriesAndTerritories ,mortality = total_deaths/popData2019)
+
+
+world_deaths <- left_join(x = world, y = covid_deaths_tbl, by = c("region" = "countriesAndTerritories"))
+
+
+# Data Visualization ----
+
+world_deaths %>%
+  
+  ggplot() +
+  
+  geom_map(aes(x = long, y = lat, map_id = region, fill = mortality), map = world) +
+  
+  scale_fill_gradient(low = "red", high = "black",
+                      breaks = seq(0, 0.0013, by = 0.0003) ,
+                      labels = scales::label_number(scale = 100,
+                                                    prefix = "",
+                                                    suffix = " %")) +
+  
+  theme_minimal() +
+  
+  scale_x_continuous(labels = NULL) +
+  scale_y_continuous(labels = NULL) +
+  
+  
+  labs(
+    title = "Confirmed COVID-19 deaths relative to the population size",
+    subtitle = " ",
+    x = " ",
+    y = " ",
+    fill = "Mortality Rate"
+   ) 
+
+
+
+```
